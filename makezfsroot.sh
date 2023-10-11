@@ -38,6 +38,11 @@ HOME_FS="zroot/home_x"
 
 IMG_HOSTNAME="ai-trainer-X."
 CHR_DIR="/mnt"
+DEFAULT_CP="UTF-8"
+DEFAULT_LC="en_US"
+DEFAULT_LANG="${DEFAULT_LC}.${DEFAULT_CP}"
+DEFAULT_AUSER="sobomax"
+DEFAULT_APSWD="123qwe"
 
 for fs in "${ROOT_FS}" "${HOME_FS}"
 do
@@ -67,6 +72,7 @@ cp /etc/resolv.conf "${CHR_DIR}/etc"
 mount -t proc proc "${CHR_DIR}/proc"
 mount -t sysfs sys "${CHR_DIR}/sys"
 mount -B /dev "${CHR_DIR}/dev"
+mount -B /dev/shm "${CHR_DIR}/dev/shm"
 mount -t devpts pts "${CHR_DIR}/dev/pts"
 
 zgenhostid -o "${CHR_DIR}/etc/hostid"
@@ -99,10 +105,10 @@ ${APT_UPDATE}
 ${APT_UPGRADE}
 ${APT_INSTALL} --no-install-recommends linux-generic locales
 
-localedef -f UTF-8 -i en_US en_US.UTF-8
-perl -pi -e 's|^.*en_US.UTF-8 |en_US.UTF-8 |'  /etc/locale.gen
+localedef -f ${DEFAULT_CP} -i ${DEFAULT_LC} ${DEFAULT_LANG}
+perl -pi -e "s|^.*${DEFAULT_LANG} |${DEFAULT_LANG} |"  /etc/locale.gen
 locale-gen
-update-locale LANG=en_US.UTF-8
+update-locale LANG=${DEFAULT_LANG}
 
 echo "tzdata tzdata/Areas select Etc" | debconf-set-selections
 echo "tzdata tzdata/Zones/Etc select UTC" | debconf-set-selections
@@ -117,6 +123,10 @@ systemctl enable zfs-import.target
 
 update-initramfs -c -k all
 zfs set org.zfsbootmenu:commandline="quiet loglevel=4" "${ROOT_FS}"
+
+adduser --disabled-password --gecos "" "${DEFAULT_AUSER}"
+echo "${DEFAULT_AUSER}:${DEFAULT_APSWD}" | chpasswd
+usermod -aG render "${DEFAULT_AUSER}"
 
 ${APT_INSTALL} intel-gpu-tools wget gpg
 wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
@@ -135,3 +145,23 @@ __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision.sh"
 chroot "${CHR_DIR}" "/tmp/provision.sh"
+
+CONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+
+cat << __EOF__ > "${CHR_DIR}/tmp/provision_user.sh"
+#!/bin/sh
+
+set -e
+set -x
+
+mkdir -p ~/miniconda3
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
+bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
+rm ~/miniconda3/miniconda.sh
+
+~/miniconda3/bin/conda init bash
+. ~/.bashrc
+__EOF__
+
+chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
+chroot "${CHR_DIR}" su -l "${DEFAULT_AUSER}" -c "/tmp/provision_user.sh"
