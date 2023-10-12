@@ -4,11 +4,12 @@ set -e
 
 . /etc/os-release
 
-APT_CMD="env DEBIAN_FRONTEND=noninteractive apt"
+APT_ENV="env DEBIAN_FRONTEND=noninteractive"
+APT_CMD="${APT_ENV} apt"
+APT_GET_CMD="${APT_ENV} apt-get"
 APT_UPDATE="${APT_CMD} update -y"
 APT_UPGRADE="${APT_CMD} upgrade -y"
-APT_INSTALL="${APT_CMD} install -y"
-APT_CLEAN="${APT_CMD} clean"
+APT_INSTALL="${APT_GET_CMD} install -y"
 
 ${APT_UPDATE}
 ${APT_INSTALL} apt-cacher-ng
@@ -147,9 +148,8 @@ wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCT
 echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | \
  tee /etc/apt/sources.list.d/oneAPI.list
 ${APT_UPDATE}
-${APT_INSTALL} level-zero intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
 
-#${APT_CLEAN}
+${APT_INSTALL} level-zero intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision.sh"
