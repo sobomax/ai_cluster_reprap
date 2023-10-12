@@ -18,9 +18,11 @@ systemctl start apt-cacher-ng
 if ! grep -q "^PassThroughPattern:" /etc/apt-cacher-ng/acng.conf
 then
   echo "PassThroughPattern: .*" >> /etc/apt-cacher-ng/acng.conf
+  echo "AllowUserPorts: 80 443" >> /etc/apt-cacher-ng/acng.conf
   systemctl restart apt-cacher-ng
 fi
 HTTP_PROXY_ENV="env http_proxy=http://localhost:3142/"
+APT_UPDATE="${HTTP_PROXY_ENV} ${APT_UPDATE}"
 APT_INSTALL="${HTTP_PROXY_ENV} ${APT_INSTALL}"
 APT_UPGRADE="${HTTP_PROXY_ENV} ${APT_UPGRADE}"
 ${APT_INSTALL} debootstrap gdisk zfsutils-linux
@@ -63,8 +65,6 @@ zfs create -o mountpoint="${CHR_DIR}/home" "${HOME_FS}"
 
 udevadm trigger
 
-#cat << __EOF__ > "${CHR_DIR}/tmp/provision.sh"
-#zgenhostid
 ${HTTP_PROXY_ENV} debootstrap "${VERSION_CODENAME}" "${CHR_DIR}"
 
 cp /etc/resolv.conf "${CHR_DIR}/etc"
@@ -100,7 +100,7 @@ set -e
 set -x
 
 echo "${IMG_HOSTNAME}" > /etc/hostname
-echo -e "127.0.1.1\t${IMG_HOSTNAME}" >> /etc/hosts
+echo "127.0.1.1\t${IMG_HOSTNAME}" >> /etc/hosts
 ${APT_UPDATE}
 ${APT_UPGRADE}
 ${APT_INSTALL} --no-install-recommends linux-generic locales
@@ -147,6 +147,7 @@ chmod 755 "${CHR_DIR}/tmp/provision.sh"
 chroot "${CHR_DIR}" "/tmp/provision.sh"
 
 CONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+CONDA_MAINENV="SpeechT5"
 
 cat << __EOF__ > "${CHR_DIR}/tmp/provision_user.sh"
 #!/bin/sh
@@ -160,7 +161,12 @@ bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
 rm ~/miniconda3/miniconda.sh
 
 ~/miniconda3/bin/conda init bash
-. ~/.bashrc
+. ~/miniconda3/etc/profile.d/conda.sh
+conda update -y conda
+conda create -y --name "${CONDA_MAINENV}"
+conda activate "${CONDA_MAINENV}"
+conda install -y pip
+python -m pip install torch==2.0.1a0 torchvision==0.15.2a0 intel_extension_for_pytorch==2.0.110+xpu -f https://developer.intel.com/ipex-whl-stable-xpu
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
