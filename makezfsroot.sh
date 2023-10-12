@@ -19,6 +19,7 @@ if ! grep -q "^PassThroughPattern:" /etc/apt-cacher-ng/acng.conf
 then
   echo "PassThroughPattern: .*" >> /etc/apt-cacher-ng/acng.conf
   echo "AllowUserPorts: 80 443" >> /etc/apt-cacher-ng/acng.conf
+  echo "PfilePatternEx: .*" >> /etc/apt-cacher-ng/acng.conf
   systemctl restart apt-cacher-ng
 fi
 HTTP_PROXY_ENV="env http_proxy=http://localhost:3142/"
@@ -37,6 +38,9 @@ POOL_DEVICE="${POOL_DISK}p${POOL_PART}"
 
 ROOT_FS="zroot/ROOT_x"
 HOME_FS="zroot/home_x"
+CACHE_FS_USER="zroot/ai_build_cache/user"
+CACHE_FS_SYS="zroot/ai_build_cache/sys"
+CACHE_FS_APT="zroot/ai_build_cache/apt"
 
 IMG_HOSTNAME="ai-trainer-X."
 CHR_DIR="/mnt"
@@ -74,6 +78,8 @@ mount -t sysfs sys "${CHR_DIR}/sys"
 mount -B /dev "${CHR_DIR}/dev"
 mount -B /dev/shm "${CHR_DIR}/dev/shm"
 mount -t devpts pts "${CHR_DIR}/dev/pts"
+mount -t zfs "${CACHE_FS_SYS}" "${CHR_DIR}/var/cache"
+mount -t zfs "${CACHE_FS_APT}" "${CHR_DIR}/var/lib/apt/lists"
 
 zgenhostid -o "${CHR_DIR}/etc/hostid"
 
@@ -114,7 +120,7 @@ echo "tzdata tzdata/Areas select Etc" | debconf-set-selections
 echo "tzdata tzdata/Zones/Etc select UTC" | debconf-set-selections
 DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
 
-${APT_INSTALL} dosfstools zfs-initramfs zfsutils-linux
+${APT_INSTALL} dosfstools zfs-initramfs zfsutils-linux sudo
 
 systemctl enable zfs.target
 systemctl enable zfs-import-cache
@@ -128,6 +134,9 @@ adduser --disabled-password --gecos "" "${DEFAULT_AUSER}"
 echo "${DEFAULT_AUSER}:${DEFAULT_APSWD}" | chpasswd
 usermod -aG render "${DEFAULT_AUSER}"
 
+echo "${DEFAULT_AUSER}    ALL=(ALL:ALL) ALL" > /etc/sudoers.d/default_auser
+chmod 600 /etc/sudoers.d/default_auser
+
 ${APT_INSTALL} intel-gpu-tools wget gpg
 wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
  gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg
@@ -140,14 +149,22 @@ echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt
 ${APT_UPDATE}
 ${APT_INSTALL} level-zero intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
 
-${APT_CLEAN}
+#${APT_CLEAN}
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision.sh"
 chroot "${CHR_DIR}" "/tmp/provision.sh"
+rm "${CHR_DIR}/tmp/provision.sh"
 
 CONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
 CONDA_MAINENV="SpeechT5"
+
+CACHE_DIR="/home/${DEFAULT_AUSER}/.cache"
+CHR_CACHE_DIR="${CHR_DIR}/${CACHE_DIR}"
+mkdir "${CHR_CACHE_DIR}"
+chroot "${CHR_DIR}" chown "${DEFAULT_AUSER}" "${CACHE_DIR}"
+mount -t zfs "${CACHE_FS_USER}" "${CHR_CACHE_DIR}"
+chroot "${CHR_DIR}" chown "${DEFAULT_AUSER}" "${CACHE_DIR}"
 
 cat << __EOF__ > "${CHR_DIR}/tmp/provision_user.sh"
 #!/bin/sh
@@ -156,12 +173,22 @@ set -e
 set -x
 
 mkdir -p ~/miniconda3
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
+
+${HTTP_PROXY_ENV} wget http://HTTPS///repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
 bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
 rm ~/miniconda3/miniconda.sh
 
+if [ ! -e ~/.cache/conda/pkgs ]
+then
+  mkdir -p ~/.cache/conda/pkgs
+fi
+mv ~/miniconda3/pkgs/*.conda ~/.cache/conda/pkgs
+rm -r ~/miniconda3/pkgs
+ln -sf ~/.cache/conda/pkgs ~/miniconda3/pkgs
+
 ~/miniconda3/bin/conda init bash
 . ~/miniconda3/etc/profile.d/conda.sh
+
 conda update -y conda
 conda create -y --name "${CONDA_MAINENV}"
 conda activate "${CONDA_MAINENV}"
