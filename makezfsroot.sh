@@ -39,9 +39,10 @@ POOL_DEVICE="${POOL_DISK}p${POOL_PART}"
 
 ROOT_FS="zroot/ROOT_x"
 HOME_FS="zroot/home_x"
-CACHE_FS_USER="zroot/ai_build_cache/user"
-CACHE_FS_SYS="zroot/ai_build_cache/sys"
-CACHE_FS_APT="zroot/ai_build_cache/apt"
+CACHE_FS="zroot/ai_build_cache"
+CACHE_FS_USER="${CACHE_FS}/user"
+CACHE_FS_SYS="${CACHE_FS}/sys"
+CACHE_FS_APT="${CACHE_FS}/apt"
 
 IMG_HOSTNAME="ai-trainer-X."
 CHR_DIR="/mnt"
@@ -51,18 +52,33 @@ DEFAULT_LANG="${DEFAULT_LC}.${DEFAULT_CP}"
 DEFAULT_AUSER="sobomax"
 DEFAULT_APSWD="123qwe"
 
+zfs_exists() {
+  zfs get -H available "${1}" >/dev/null 2>/dev/null
+  return "${?}"
+}
+
+if mountpoint "${CHR_DIR}" >/dev/null
+then
+  umount -R "${CHR_DIR}"
+fi
+
 for fs in "${ROOT_FS}" "${HOME_FS}"
 do
-  if ! zfs get -H available "${fs}" >/dev/null 2>/dev/null
+  if ! zfs_exists "${fs}"
   then
     continue
   fi
-  if mountpoint "${CHR_DIR}" >/dev/null
-  then
-    umount -R "${CHR_DIR}"
-  fi
   zfs destroy -f -r "${fs}"
 done
+
+if ! zfs_exists "${CACHE_FS}"
+then
+  zfs create -o mountpoint=none "${CACHE_FS}"
+  for fs in "${CACHE_FS_USER}" "${CACHE_FS_SYS}" "${CACHE_FS_APT}"
+  do
+    zfs create -o mountpoint=legacy "${fs}"
+  done
+fi
 
 zfs create -o mountpoint=none "${ROOT_FS}"
 zfs create -o mountpoint="${CHR_DIR}" "${ROOT_FS}/${ID}"
@@ -121,7 +137,7 @@ echo "tzdata tzdata/Areas select Etc" | debconf-set-selections
 echo "tzdata tzdata/Zones/Etc select UTC" | debconf-set-selections
 DEBIAN_FRONTEND=noninteractive dpkg-reconfigure tzdata
 
-${APT_INSTALL} dosfstools zfs-initramfs zfsutils-linux sudo
+${APT_INSTALL} dosfstools zfs-initramfs zfsutils-linux
 
 systemctl enable zfs.target
 systemctl enable zfs-import-cache
@@ -131,6 +147,8 @@ systemctl enable zfs-import.target
 update-initramfs -c -k all
 zfs set org.zfsbootmenu:commandline="quiet loglevel=4" "${ROOT_FS}"
 
+${APT_INSTALL} sudo git libgl1 strace
+
 adduser --disabled-password --gecos "" "${DEFAULT_AUSER}"
 echo "${DEFAULT_AUSER}:${DEFAULT_APSWD}" | chpasswd
 usermod -aG render "${DEFAULT_AUSER}"
@@ -138,7 +156,7 @@ usermod -aG render "${DEFAULT_AUSER}"
 echo "${DEFAULT_AUSER}    ALL=(ALL:ALL) ALL" > /etc/sudoers.d/default_auser
 chmod 600 /etc/sudoers.d/default_auser
 
-${APT_INSTALL} intel-gpu-tools wget gpg
+${APT_INSTALL} intel-gpu-tools libgomp1 clinfo wget gpg
 wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
  gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg
 echo "deb [arch=amd64,i386 signed-by=/usr/share/keyrings/intel-graphics.gpg] http://repositories.intel.com/gpu/ubuntu jammy client" | \
@@ -149,7 +167,8 @@ echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt
  tee /etc/apt/sources.list.d/oneAPI.list
 ${APT_UPDATE}
 
-${APT_INSTALL} level-zero intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
+${APT_INSTALL} ocl-icd-libopencl1 intel-opencl-icd intel-level-zero-gpu level-zero
+${APT_INSTALL} intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision.sh"
@@ -190,10 +209,12 @@ ln -sf ~/.cache/conda/pkgs ~/miniconda3/pkgs
 . ~/miniconda3/etc/profile.d/conda.sh
 
 conda update -y conda
-conda create -y --name "${CONDA_MAINENV}"
+conda create -y --name "${CONDA_MAINENV}" python=3.10
 conda activate "${CONDA_MAINENV}"
 conda install -y pip
 python -m pip install torch==2.0.1a0 torchvision==0.15.2a0 intel_extension_for_pytorch==2.0.110+xpu -f https://developer.intel.com/ipex-whl-stable-xpu
+
+python -c 'import intel_extension_for_pytorch as ipex;import torch;t=torch.tensor([1, 2, 3, 4, 5]).to("xpu");t=t*t;print(t)'
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
