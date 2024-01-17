@@ -23,7 +23,7 @@ then
   echo "PfilePatternEx: .*" >> /etc/apt-cacher-ng/acng.conf
   systemctl restart apt-cacher-ng
 fi
-HTTP_PROXY_ENV="env http_proxy=http://localhost:3142/"
+HTTP_PROXY_ENV="env http_proxy=http://127.0.0.1:3142/"
 APT_UPDATE="${HTTP_PROXY_ENV} ${APT_UPDATE}"
 APT_INSTALL="${HTTP_PROXY_ENV} ${APT_INSTALL}"
 APT_UPGRADE="${HTTP_PROXY_ENV} ${APT_UPGRADE}"
@@ -209,10 +209,10 @@ ln -sf ~/.cache/conda/pkgs ~/miniconda3/pkgs
 . ~/miniconda3/etc/profile.d/conda.sh
 
 conda update -y conda
-conda create -y --name "${CONDA_MAINENV}" python=3.10
+conda create -y --name "${CONDA_MAINENV}" python=3.11
 conda activate "${CONDA_MAINENV}"
 conda install -y pip
-python -m pip install torch==2.0.1a0 torchvision==0.15.2a0 intel_extension_for_pytorch==2.0.110+xpu -f https://developer.intel.com/ipex-whl-stable-xpu
+python -m pip install torch==2.1.0a0 torchvision==0.16.0a0 torchaudio==2.1.0a0 intel-extension-for-pytorch==2.1.10+xpu --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
 
 python -c 'import intel_extension_for_pytorch as ipex;import torch;t=torch.tensor([1, 2, 3, 4, 5]).to("xpu");t=t*t;print(t)'
 __EOF__
