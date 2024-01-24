@@ -1,0 +1,3 @@
+[submodule "Profiles"]
+	path = Profiles
+	url = git@github.com:fusorai/ai_cluster.Profiles.sippy.git

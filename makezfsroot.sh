@@ -2,6 +2,10 @@
 
 set -e
 
+PROJECT="Infernos"
+NODETYPE="inferner-sm"
+ZFS_BUILD_ROOT="zroot_20230117"
+
 . /etc/os-release
 
 APT_ENV="env DEBIAN_FRONTEND=noninteractive"
@@ -29,27 +33,19 @@ APT_INSTALL="${HTTP_PROXY_ENV} ${APT_INSTALL}"
 APT_UPGRADE="${HTTP_PROXY_ENV} ${APT_UPGRADE}"
 ${APT_INSTALL} debootstrap gdisk zfsutils-linux
 
-BOOT_DISK="/dev/nvme0n1"
-BOOT_PART="1"
-BOOT_DEVICE="${BOOT_DISK}p${BOOT_PART}"
-
-POOL_DISK="/dev/nvme0n1"
-POOL_PART="2"
-POOL_DEVICE="${POOL_DISK}p${POOL_PART}"
-
-ROOT_FS="zroot/ROOT_x"
-HOME_FS="zroot/home_x"
-CACHE_FS="zroot/ai_build_cache"
+ROOT_FS="${ZFS_BUILD_ROOT}/${PROJECT}.${NODETYPE}"
+HOME_FS="${ROOT_FS}/home"
+CACHE_FS="${ZFS_BUILD_ROOT}/ai_build_cache"
 CACHE_FS_USER="${CACHE_FS}/user"
 CACHE_FS_SYS="${CACHE_FS}/sys"
 CACHE_FS_APT="${CACHE_FS}/apt"
 
-IMG_HOSTNAME="ai-trainer-X."
-CHR_DIR="/mnt"
+IMG_HOSTNAME="${NODETYPE}-X."
+CHR_DIR="`mktemp -d`"
 DEFAULT_CP="UTF-8"
 DEFAULT_LC="en_US"
 DEFAULT_LANG="${DEFAULT_LC}.${DEFAULT_CP}"
-DEFAULT_AUSER="sobomax"
+DEFAULT_AUSER="sshrpc"
 DEFAULT_APSWD="123qwe"
 
 zfs_exists() {
@@ -57,16 +53,30 @@ zfs_exists() {
   return "${?}"
 }
 
+zfs_mounted() {
+  zfs mount | grep -q "^${1} "
+  return "${?}"
+}
+
+zfs_unmount() {
+  local MPT="`zfs mount | grep "^${1} " | awk '{print $2}'`"
+  umount -f -R "${MPT}"
+}
+
 if mountpoint "${CHR_DIR}" >/dev/null
 then
   umount -R "${CHR_DIR}"
 fi
 
-for fs in "${ROOT_FS}" "${HOME_FS}"
+for fs in "${HOME_FS}" "${ROOT_FS}/${ID}" "${ROOT_FS}"
 do
   if ! zfs_exists "${fs}"
   then
     continue
+  fi
+  if zfs_mounted "${fs}"
+  then
+    zfs_unmount "${fs}"
   fi
   zfs destroy -f -r "${fs}"
 done
@@ -100,21 +110,14 @@ mount -t zfs "${CACHE_FS_APT}" "${CHR_DIR}/var/lib/apt/lists"
 
 zgenhostid -o "${CHR_DIR}/etc/hostid"
 
-cat << __EOF__ > "${CHR_DIR}/etc/apt/sources.list"
-# Uncomment the deb-src entries if you need source packages
-
-deb http://archive.ubuntu.com/ubuntu/ lunar main restricted universe multiverse
-# deb-src http://archive.ubuntu.com/ubuntu/ lunar main restricted universe multiverse
-
-deb http://archive.ubuntu.com/ubuntu/ lunar-updates main restricted universe multiverse
-# deb-src http://archive.ubuntu.com/ubuntu/ lunar-updates main restricted universe multiverse
-
-deb http://archive.ubuntu.com/ubuntu/ lunar-security main restricted universe multiverse
-# deb-src http://archive.ubuntu.com/ubuntu/ lunar-security main restricted universe multiverse
-
-deb http://archive.ubuntu.com/ubuntu/ lunar-backports main restricted universe multiverse
-# deb-src http://archive.ubuntu.com/ubuntu/ lunar-backports main restricted universe multiverse
-__EOF__
+PPREF="Profiles/${PROJECT}/${NODETYPE}/"
+for file in `find "${PPREF}" -type f`
+do
+  ofile="${CHR_DIR}/${file#${PPREF}}"
+  odir="`dirname "${ofile}"`"
+  test -e "${odir}" || mkdir -p "${odir}"
+  cat ${file} > "${CHR_DIR}/${file#${PPREF}}"
+done
 
 cat << __EOF__ > "${CHR_DIR}/tmp/provision.sh"
 #!/bin/sh
@@ -169,6 +172,7 @@ ${APT_UPDATE}
 
 ${APT_INSTALL} ocl-icd-libopencl1 intel-opencl-icd intel-level-zero-gpu level-zero
 ${APT_INSTALL} intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
+${APT_INSTALL} openssh-server
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision.sh"
@@ -219,3 +223,5 @@ __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
 chroot "${CHR_DIR}" su -l "${DEFAULT_AUSER}" -c "/tmp/provision_user.sh"
+
+umount -R "${CHR_DIR}"
