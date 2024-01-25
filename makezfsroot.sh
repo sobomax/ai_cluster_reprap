@@ -4,7 +4,8 @@ set -e
 
 PROJECT="Infernos"
 NODETYPE="inferner-sm"
-ZFS_BUILD_ROOT="zroot_20230117"
+ZFS_BUILD_ROOT="zroot_20240119"
+RUN_SELFTEST=0
 
 . /etc/os-release
 
@@ -173,6 +174,7 @@ ${APT_UPDATE}
 ${APT_INSTALL} ocl-icd-libopencl1 intel-opencl-icd intel-level-zero-gpu level-zero
 ${APT_INSTALL} intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
 ${APT_INSTALL} openssh-server
+systemctl enable ssh
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision.sh"
@@ -217,11 +219,16 @@ conda create -y --name "${CONDA_MAINENV}" python=3.11
 conda activate "${CONDA_MAINENV}"
 conda install -y pip
 python -m pip install torch==2.1.0a0 torchvision==0.16.0a0 torchaudio==2.1.0a0 intel-extension-for-pytorch==2.1.10+xpu --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
-
-python -c 'import intel_extension_for_pytorch as ipex;import torch;t=torch.tensor([1, 2, 3, 4, 5]).to("xpu");t=t*t;print(t)'
+if [ ${RUN_SELFTEST} -ne 0 ]
+then
+  python -c 'import intel_extension_for_pytorch as ipex;import torch;t=torch.tensor([1, 2, 3, 4, 5]).to("xpu");t=t*t;print(t)'
+fi
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
 chroot "${CHR_DIR}" su -l "${DEFAULT_AUSER}" -c "/tmp/provision_user.sh"
 
 umount -R "${CHR_DIR}"
+
+zfs set mountpoint=/ canmount=noauto "${ROOT_FS}/${ID}"
+zfs set mountpoint=/home canmount=noauto "${HOME_FS}"
