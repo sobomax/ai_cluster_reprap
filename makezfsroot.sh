@@ -5,6 +5,7 @@ set -e
 PROJECT="Infernos"
 NODETYPE="inferner-sm"
 ZFS_BUILD_ROOT="zroot_20240119"
+KERNEL_AT="/var/www/html/boot/vmlinuz.${PROJECT}.${NODETYPE}"
 RUN_SELFTEST=0
 
 . /etc/os-release
@@ -26,6 +27,8 @@ then
   echo "PassThroughPattern: .*" >> /etc/apt-cacher-ng/acng.conf
   echo "AllowUserPorts: 80 443" >> /etc/apt-cacher-ng/acng.conf
   echo "PfilePatternEx: .*" >> /etc/apt-cacher-ng/acng.conf
+  echo "DlMaxRetries: 20" >> /etc/apt-cacher-ng/acng.conf
+
   systemctl restart apt-cacher-ng
 fi
 HTTP_PROXY_ENV="env http_proxy=http://127.0.0.1:3142/"
@@ -173,6 +176,7 @@ ${APT_UPDATE}
 
 ${APT_INSTALL} ocl-icd-libopencl1 intel-opencl-icd intel-level-zero-gpu level-zero
 ${APT_INSTALL} intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
+${APT_INSTALL} nvidia-driver-545
 ${APT_INSTALL} openssh-server
 systemctl enable ssh
 __EOF__
@@ -228,6 +232,8 @@ __EOF__
 chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
 chroot "${CHR_DIR}" su -l "${DEFAULT_AUSER}" -c "/tmp/provision_user.sh"
 
+cp -L "${CHR_DIR}/boot/vmlinuz" "${KERNEL_AT}"
+chmod 655 "${KERNEL_AT}"
 umount -R "${CHR_DIR}"
 
 zfs set mountpoint=/ canmount=noauto "${ROOT_FS}/${ID}"
