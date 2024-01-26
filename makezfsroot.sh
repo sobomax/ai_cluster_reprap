@@ -4,11 +4,12 @@ set -e
 
 PROJECT="Infernos"
 NODETYPE="inferner-sm"
-ZFS_BUILD_ROOT="zroot_20240119"
-KERNEL_AT="/var/www/html/boot/vmlinuz.${PROJECT}.${NODETYPE}"
-INITRD_AT="/var/www/html/boot/initrd.${PROJECT}.${NODETYPE}.img"
-RUN_SELFTEST=0
-HW_TYPE="nvidia"
+
+. "Profiles/${PROJECT}/build.conf"
+. "Profiles/${PROJECT}/${NODETYPE}/build.conf"
+
+KERNEL_AT="${BOOT_AT}/vmlinuz.${PROJECT}.${NODETYPE}"
+INITRD_AT="${BOOT_AT}/initrd.${PROJECT}.${NODETYPE}.img"
 
 . /etc/os-release
 
@@ -124,6 +125,7 @@ do
   test -e "${odir}" || mkdir -p "${odir}"
   cat ${file} > "${CHR_DIR}/${file#${PPREF}}"
 done
+chroot "${CHR_DIR}" sh -s < "Profiles/${PROJECT}/${NODETYPE}/root.finalize.sh"
 
 cat << __EOF__ > "${CHR_DIR}/tmp/provision.sh"
 #!/bin/sh
