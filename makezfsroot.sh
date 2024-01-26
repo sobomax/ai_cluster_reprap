@@ -6,7 +6,9 @@ PROJECT="Infernos"
 NODETYPE="inferner-sm"
 ZFS_BUILD_ROOT="zroot_20240119"
 KERNEL_AT="/var/www/html/boot/vmlinuz.${PROJECT}.${NODETYPE}"
+INITRD_AT="/var/www/html/boot/initrd.${PROJECT}.${NODETYPE}.img"
 RUN_SELFTEST=0
+HW_TYPE="nvidia"
 
 . /etc/os-release
 
@@ -114,7 +116,7 @@ mount -t zfs "${CACHE_FS_APT}" "${CHR_DIR}/var/lib/apt/lists"
 
 zgenhostid -o "${CHR_DIR}/etc/hostid"
 
-PPREF="Profiles/${PROJECT}/${NODETYPE}/"
+PPREF="Profiles/${PROJECT}/${NODETYPE}/root/"
 for file in `find "${PPREF}" -type f`
 do
   ofile="${CHR_DIR}/${file#${PPREF}}"
@@ -163,22 +165,29 @@ usermod -aG render "${DEFAULT_AUSER}"
 echo "${DEFAULT_AUSER}    ALL=(ALL:ALL) ALL" > /etc/sudoers.d/default_auser
 chmod 600 /etc/sudoers.d/default_auser
 
-${APT_INSTALL} intel-gpu-tools libgomp1 clinfo wget gpg
-wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
- gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg
-echo "deb [arch=amd64,i386 signed-by=/usr/share/keyrings/intel-graphics.gpg] http://repositories.intel.com/gpu/ubuntu jammy client" | \
- tee /etc/apt/sources.list.d/intel-gpu-jammy.list
-wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | \
- gpg --dearmor --output /usr/share/keyrings/oneapi-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | \
- tee /etc/apt/sources.list.d/oneAPI.list
-${APT_UPDATE}
-
-${APT_INSTALL} ocl-icd-libopencl1 intel-opencl-icd intel-level-zero-gpu level-zero
-${APT_INSTALL} intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
-${APT_INSTALL} nvidia-driver-545
-${APT_INSTALL} openssh-server
+${APT_INSTALL} openssh-server gdisk parted
 systemctl enable ssh
+
+if [ "${HW_TYPE}" = "intel" ]
+then
+  ${APT_INSTALL} intel-gpu-tools libgomp1 clinfo wget gpg
+  wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
+   gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg
+  echo "deb [arch=amd64,i386 signed-by=/usr/share/keyrings/intel-graphics.gpg] http://repositories.intel.com/gpu/ubuntu jammy client" | \
+   tee /etc/apt/sources.list.d/intel-gpu-jammy.list
+  wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | \
+   gpg --dearmor --output /usr/share/keyrings/oneapi-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | \
+   tee /etc/apt/sources.list.d/oneAPI.list
+  ${APT_UPDATE}
+
+  ${APT_INSTALL} ocl-icd-libopencl1 intel-opencl-icd intel-level-zero-gpu level-zero
+  ${APT_INSTALL} intel-oneapi-runtime-libs intel-oneapi-compiler-dpcpp-cpp
+fi
+if [ "${HW_TYPE}" = "nvidia" ]
+then
+  ${APT_INSTALL} nvidia-driver-545 clinfo
+fi
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision.sh"
@@ -222,19 +231,34 @@ conda update -y conda
 conda create -y --name "${CONDA_MAINENV}" python=3.11
 conda activate "${CONDA_MAINENV}"
 conda install -y pip
-python -m pip install torch==2.1.0a0 torchvision==0.16.0a0 torchaudio==2.1.0a0 intel-extension-for-pytorch==2.1.10+xpu --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+if [ "${HW_TYPE}" = "intel" ]
+then
+  python -m pip install torch==2.1.0a0 torchvision==0.16.0a0 torchaudio==2.1.0a0 intel-extension-for-pytorch==2.1.10+xpu --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+  SELFTEST='import intel_extension_for_pytorch as ipex;import torch;t=torch.tensor([1, 2, 3, 4, 5]).to("xpu");t=t*t;print(t)'
+fi
+if [ "${HW_TYPE}" = "nvidia" ]
+then
+  python -m pip install torch torchvision torchaudio
+  SELFTEST='import torch;t=torch.tensor([1, 2, 3, 4, 5]).to("cuda");t=t*t;print(t)'
+fi
 if [ ${RUN_SELFTEST} -ne 0 ]
 then
-  python -c 'import intel_extension_for_pytorch as ipex;import torch;t=torch.tensor([1, 2, 3, 4, 5]).to("xpu");t=t*t;print(t)'
+  python -c "${SELFTEST}"
 fi
 __EOF__
 
 chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
 chroot "${CHR_DIR}" su -l "${DEFAULT_AUSER}" -c "/tmp/provision_user.sh"
 
+mkdir "${CHR_DIR}/tmp/initramfs"
+mount --bind "Profiles/${PROJECT}/${NODETYPE}/initramfs" "${CHR_DIR}/tmp/initramfs"
+chroot "${CHR_DIR}" mkinitramfs -d /tmp/initramfs -o /tmp/initrd.img
+
 cp -L "${CHR_DIR}/boot/vmlinuz" "${KERNEL_AT}"
-chmod 655 "${KERNEL_AT}"
+mv "${CHR_DIR}/tmp/initrd.img" "${INITRD_AT}"
+chmod 644 "${KERNEL_AT}" "${INITRD_AT}"
 umount -R "${CHR_DIR}"
+rmdir "${CHR_DIR}"
 
 zfs set mountpoint=/ canmount=noauto "${ROOT_FS}/${ID}"
 zfs set mountpoint=/home canmount=noauto "${HOME_FS}"
