@@ -117,15 +117,21 @@ mount -t zfs "${CACHE_FS_APT}" "${CHR_DIR}/var/lib/apt/lists"
 
 zgenhostid -o "${CHR_DIR}/etc/hostid"
 
-PPREF="Profiles/${PROJECT}/${NODETYPE}/root/"
-for file in `find "${PPREF}" -type f`
+for prefdir in "root" "${NODETYPE}/root"
 do
-  ofile="${CHR_DIR}/${file#${PPREF}}"
-  odir="`dirname "${ofile}"`"
-  test -e "${odir}" || mkdir -p "${odir}"
-  cat ${file} > "${CHR_DIR}/${file#${PPREF}}"
+  PPREF="Profiles/${PROJECT}/${prefdir}/"
+  for file in `find "${PPREF}" -type f`
+  do
+    ofile="${CHR_DIR}/${file#${PPREF}}"
+    odir="`dirname "${ofile}"`"
+    test -e "${odir}" || mkdir -p "${odir}"
+    cat ${file} > "${CHR_DIR}/${file#${PPREF}}"
+  done
+  if [ -e "Profiles/${PROJECT}/${prefdir}.finalize.sh" ]
+  then
+    chroot "${CHR_DIR}" sh -s < "Profiles/${PROJECT}/${prefdir}.finalize.sh"
+  fi
 done
-chroot "${CHR_DIR}" sh -s < "Profiles/${PROJECT}/${NODETYPE}/root.finalize.sh"
 
 cat << __EOF__ > "${CHR_DIR}/tmp/provision.sh"
 #!/bin/sh
