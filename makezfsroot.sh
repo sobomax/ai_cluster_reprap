@@ -259,7 +259,12 @@ chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
 chroot "${CHR_DIR}" su -l "${DEFAULT_AUSER}" -c "/tmp/provision_user.sh"
 
 mkdir "${CHR_DIR}/tmp/initramfs"
-mount --bind "Profiles/${PROJECT}/${NODETYPE}/initramfs" "${CHR_DIR}/tmp/initramfs"
+if [ -e "Profiles/${PROJECT}/${NODETYPE}/initramfs" -a -e "Profiles/${PROJECT}/initramfs" ]
+then
+  unionfs-fuse -o ro "Profiles/${PROJECT}/initramfs=RO:Profiles/${PROJECT}/${NODETYPE}/initramfs=RO" "${CHR_DIR}/tmp/initramfs"
+else
+  mount --bind "Profiles/${PROJECT}/${NODETYPE}/initramfs" "${CHR_DIR}/tmp/initramfs"
+fi
 chroot "${CHR_DIR}" mkinitramfs -d /tmp/initramfs -o /tmp/initrd.img
 
 cp -L "${CHR_DIR}/boot/vmlinuz" "${KERNEL_AT}"
