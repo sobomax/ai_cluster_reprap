@@ -40,7 +40,7 @@ APT_INSTALL="${HTTP_PROXY_ENV} ${APT_INSTALL}"
 APT_UPGRADE="${HTTP_PROXY_ENV} ${APT_UPGRADE}"
 ${APT_INSTALL} debootstrap gdisk zfsutils-linux
 
-ROOT_FS="${ZFS_BUILD_ROOT}/${PROJECT}.${NODETYPE}"
+ROOT_FS="${ZFS_BUILD_ROOT}/${PROJECT}.${ZFS_BUILD_REV}.${NODETYPE}"
 HOME_FS="${ROOT_FS}/home"
 CACHE_FS="${ZFS_BUILD_ROOT}/ai_build_cache"
 CACHE_FS_USER="${CACHE_FS}/user"
@@ -212,6 +212,14 @@ chroot "${CHR_DIR}" chown "${DEFAULT_AUSER}" "${CACHE_DIR}"
 mount -t zfs "${CACHE_FS_USER}" "${CHR_CACHE_DIR}"
 chroot "${CHR_DIR}" chown "${DEFAULT_AUSER}" "${CACHE_DIR}"
 
+mkdir "${CHR_DIR}/tmp/initramfs"
+if [ -e "Profiles/${PROJECT}/${NODETYPE}/initramfs" -a -e "Profiles/${PROJECT}/initramfs" ]
+then
+  unionfs-fuse -o ro,allow_other "Profiles/${PROJECT}/initramfs=RO:Profiles/${PROJECT}/${NODETYPE}/initramfs=RO" "${CHR_DIR}/tmp/initramfs"
+else
+  mount --bind "Profiles/${PROJECT}/${NODETYPE}/initramfs" "${CHR_DIR}/tmp/initramfs"
+fi
+
 cat << __EOF__ > "${CHR_DIR}/tmp/provision_user.sh"
 #!/bin/sh
 
@@ -255,16 +263,18 @@ then
 fi
 __EOF__
 
+for prefdir in "root" "${NODETYPE}/root"
+do
+  if [ -e "Profiles/${PROJECT}/${prefdir}.finalize.user.sub" ]
+  then
+    cat "Profiles/${PROJECT}/${prefdir}.finalize.user.sub" >> "${CHR_DIR}/tmp/provision_user.sh"
+  fi
+done
+
 chmod 755 "${CHR_DIR}/tmp/provision_user.sh"
 chroot "${CHR_DIR}" su -l "${DEFAULT_AUSER}" -c "/tmp/provision_user.sh"
 
-mkdir "${CHR_DIR}/tmp/initramfs"
-if [ -e "Profiles/${PROJECT}/${NODETYPE}/initramfs" -a -e "Profiles/${PROJECT}/initramfs" ]
-then
-  unionfs-fuse -o ro "Profiles/${PROJECT}/initramfs=RO:Profiles/${PROJECT}/${NODETYPE}/initramfs=RO" "${CHR_DIR}/tmp/initramfs"
-else
-  mount --bind "Profiles/${PROJECT}/${NODETYPE}/initramfs" "${CHR_DIR}/tmp/initramfs"
-fi
+cat "Profiles/${PROJECT}/build.conf" "Profiles/${PROJECT}/${NODETYPE}/build.conf" > "${CHR_DIR}/build.conf"
 chroot "${CHR_DIR}" mkinitramfs -d /tmp/initramfs -o /tmp/initrd.img
 
 cp -L "${CHR_DIR}/boot/vmlinuz" "${KERNEL_AT}"
